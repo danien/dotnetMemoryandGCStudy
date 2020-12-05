@@ -1,0 +1,664 @@
+<html>
+<head>
+<META http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+<meta content="text/css" http-equiv="Content-Style-Type">
+<title>dotnet Memory and GC Study</title>
+</head>
+<body>
+<h1 align="center" class="root">
+<a name="3dsrilsenf1qplrm291ufq6i88">dotnet Memory and GC Study</a>
+</h1>
+<div align="center" class="globalOverview">
+<img src="dotnetMemoryandGCStudy_files/images/dotnet Memory and GC Study.jpg"></div>
+<h2 class="topic">
+<a name="6ga4er0o5ag991eeahlhvle6b5">Object References &amp; the GC</a>
+</h2>
+<h3 class="topic">
+<a name="64ds64o9p52mhvd7bjnj9nrlro">&nbsp;Design</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals#the-managed-heap" name="6mskackhkikocg3k64dvbn3ecl">&nbsp;&nbsp;Common Language Runtime (CLR) Memory Management</a>
+</h3>
+<h3 class="topic">
+<a name="0ih9aemrn9132b8feits9ej2b8">&nbsp;&nbsp;&nbsp;CLR provides a managed heap (on top of native OS heap) per process. All threads for a process share the heap.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/large-object-heap" name="3cmrfe2tsj4ffnjlok187e7lb9">&nbsp;&nbsp;&nbsp;Managed Heap consists for small and large Object Heaps</a>
+</h3>
+<h3 class="topic">
+<a name="54mchbud5dbimfne2r1q7i5d8p">&nbsp;&nbsp;&nbsp;&nbsp;Small Object Heap</a>
+</h3>
+<h3 class="topic">
+<a name="6g2kehmv2vcq2j9rkjt03trff4">&nbsp;&nbsp;&nbsp;&nbsp;Large Object Heap</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/core/run-time-config/garbage-collector#large-object-heap-threshold" name="3t2me207b3ptbt771l3715t4cv">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;For allocations 85,000 bytes &amp; above, but configurable. Usually arrays.</a>
+</h3>
+<h3 class="topic">
+<a name="07epb3dsvbusk6p062jveu2841">&nbsp;&nbsp;&nbsp;Memory Segments</a>
+</h3>
+<h3 class="topic">
+<a name="4khk8u1ucvokss8ge5e59k5h5d">&nbsp;&nbsp;&nbsp;&nbsp;Memory segments are reserved from OS with native Windows VirtualAlloc API</a>
+</h3>
+<h3 class="topic">
+<a name="66dt9cedktb9olfkt2bmdhqnul">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;When a new segment is reserved, it becomes the new ephemereal segment where new Gen 0 objects are allocated in. It also contains Gen 0 objects that survived the GC and promoted to Gen 1, as well as older Gen 2 objects.</a>
+</h3>
+<h3 class="topic">
+<a name="6bu28r5vtrnjdk1phcvcg5addm">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The previous ephemeral segment becomes the Gen 2 segment.</a>
+</h3>
+<h3 class="topic">
+<a name="464hmvfv9i61jlnb3lk2bv0dvm">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Additional segments are reserved as needed based on memory demand.</a>
+</h3>
+<h3 class="topic">
+<a name="4shq0fbohtm39ldfj32nh9op3j">&nbsp;&nbsp;&nbsp;&nbsp;Memory segments are released back to OS with native Windows VirtualFree API</a>
+</h3>
+<h3 class="topic">
+<a name="6n0okd171brqmshkksh6fk2cl2">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Objects are cleared before the segments are released.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals#ephemeral-generations-and-segments" name="2r1ja9d8ubn88592bj3vgfvevo">&nbsp;&nbsp;&nbsp;&nbsp;Segment sizes are dependent of 32-64 bit and type of GC.</a>
+</h3>
+<h3 class="topic">
+<a name="1njlheskarfkv0q5np1bh17b9u">&nbsp;&nbsp;&nbsp;Managing references to objects &amp; resources</a>
+</h3>
+<h3 class="topic">
+<a name="0vttqcquec0gcrdi0jk1bc286e">&nbsp;&nbsp;&nbsp;&nbsp;Good way to think about managed references is to understand that objects are allocated on the heap, but their references can be stored as variables, method parameters, etc, on the local stack, global or static vars, etc.</a>
+</h3>
+<h3 class="topic">
+<a name="5jk870q6jh4fuu58gg8ej4bu93">&nbsp;&nbsp;&nbsp;&nbsp;In that sense, objects are permanently allocated on the heap until they are deallocated (which is why they can leak if not freed), but their references have varying lifetimes that are either managed automatically through scoping or manually (e.g., set to null) and only when all these references are no longer pointing to the object, are the objects on the heap eligible for collection.</a>
+</h3>
+<h3 class="topic">
+<a name="6olv89nn6qsf82mvkm76achut2">&nbsp;&nbsp;&nbsp;&nbsp;JIT compiler can also determine if an object is no longer used, even before the local scope ends. This means an object could potentially be GC'ed (note that GC does not happen immediately just because a reference is cleared) while in the middle of a scope. As long as the object is no longer used after some point, it may be deemed safe to GC.</a>
+</h3>
+<h3 class="topic">
+<a href="https://github.com/dotnet/runtime/issues/11152" name="7mfj81hnsihfjec297rhe7k2vf">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;GC does not clean up memory allocated in the same method for .NET Core 2.0 and later which uses RyuJIT code generator, but does so for .NET Framework and earlier .NET Core runtimes. i.e., different runtimes may have different GC behaviours.</a>
+</h3>
+<h3 class="topic">
+<a name="7apebata237u8orgmqtqsgit1v">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;If the allocation and release is done in a different (non-inlined) method, then the object's reference is cleared and is considered for GC.</a>
+</h3>
+<h3 class="topic">
+<a name="5sg2g4ssribd00j9b9ujm3nrkr">&nbsp;&nbsp;&nbsp;&nbsp;Event Handlers</a>
+</h3>
+<h3 class="topic">
+<a name="25bcgk0d6phuudapenous2nans">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Closure Capture: if an anonymous delegate or lambda that is registered as an event handler and it references variables or methods outside its own scope inside its body, the compiler generates an internal closure class definition, and instantiates an instance of this internal class at runtime with properties that represent those "captured" "free variables" as references, thereby creating a reference to those referenced objects and their owners.</a>
+</h3>
+<h3 class="topic">
+<a name="39j2t8dmr59n5c8kqobt9v55qc">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;single variable</a>
+</h3>
+<h3 class="topic">
+<a name="3u4pkdhoplr9jjsa34ep1gdbm5">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;multi-variable - A single shared generated closure class is generated for each scope, so if you reference multiple objects in your anonymous delegate/lambda, all those references will share the same lifetime.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals" name="2ininu0cf9h80rlmushf62hnue">&nbsp;&nbsp;Automatic Garbage Collection</a>
+</h3>
+<h3 class="topic">
+<a name="4cp6e64jhartfivtovdpgrof60">&nbsp;&nbsp;&nbsp;Activated only when memory is requested from heap and there is insufficient memory, (creating memory pressure).</a>
+</h3>
+<h3 class="topic">
+<a name="5lmtaopdc5akafpqav83am3oqk">&nbsp;&nbsp;&nbsp;&nbsp;It is not immediately triggered automatically when an object is no longer referenced (all references cleared) because it is not a reference counting system.</a>
+</h3>
+<h3 class="topic">
+<a name="3me6bdvhikmftd7uqo9v8k9h9i">&nbsp;&nbsp;&nbsp;&nbsp;It is also not called automatically on a schedule.</a>
+</h3>
+<h3 class="topic">
+<a name="55s1b29u0ktnkrtk6ujmu4r4r6">&nbsp;&nbsp;&nbsp;&nbsp; If you don't allocate memory dynamically for the life of the application (e.g., all static allocation from the start), GC may not be called at all.</a>
+</h3>
+<h3 class="topic">
+<a name="0t0vmj05db0nlq11v6gv8j0vmv">&nbsp;&nbsp;&nbsp;&nbsp; However, you can call GC.Collect() to trigger it manually.</a>
+</h3>
+<h3 class="topic">
+<a name="7or9a0t4icee9vikpebjhjvbvm">&nbsp;&nbsp;&nbsp;Tracing Collector</a>
+</h3>
+<h3 class="topic">
+<a name="0m9rcljj70uot355d4358c0qnh">&nbsp;&nbsp;&nbsp;&nbsp;Objects are not reference counted - the GC doesn't track individual references (unlike iOS). No reference count is kept per object.</a>
+</h3>
+<h3 class="topic">
+<a name="47ulinaq8o2r26ngkukl8brnmh">&nbsp;&nbsp;&nbsp;&nbsp;Determines whether objects are still in use by tracing references from application root objects (e.g., top level object references). The GC traces through all root objects to find references to allocated objects (i.e., generates an object graph by which objects they reference) to identify which ones are reachable (referenced by others) and therefore, still "alive" and which ones are not reachable (collectable).</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals#what-happens-during-a-garbage-collection" name="4rtuhmoj1ljup65pcmhf3t68jf">&nbsp;&nbsp;&nbsp;Multi-pass GC</a>
+</h3>
+<h3 class="topic">
+<a name="2j9js3rs25q6qmcvvnlktnvf0g">&nbsp;&nbsp;&nbsp;&nbsp;Marking phase -  Unreachable objects imply they are no longer referenced and can be collected later. Reachable objects are promoted to the next generation. See Generational Garbage Collector below.</a>
+</h3>
+<h3 class="topic">
+<a name="48mnft224lbmsb9mgnn9kvehd8">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Objects with Finalizers are not collected immediately, but are promoted to the next generation. They are also placed in a queue to be finalized later. See Finalizers below.</a>
+</h3>
+<h3 class="topic">
+<a name="2fg4ta1tun64fbiu6uoidod2od">&nbsp;&nbsp;&nbsp;&nbsp;Relocating phase - references to live objects that will be relocated/compacted are updated</a>
+</h3>
+<h3 class="topic">
+<a name="4t38ruds0nb76qbfj4f54aka9e">&nbsp;&nbsp;&nbsp;&nbsp;Compacting (collecting) phase - reclaims memory of collected objects and compacts living objects in the heap to reduce fragmentation.</a>
+</h3>
+<h3 class="topic">
+<a href="https://vkontech.com/the-dispose-pattern-step-by-step/" name="73ds6qdv7kr6d1ab09or7cnnsc">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Only collectable but non-finalizable objects and their memory are released during the GC round in which they are collected.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals#generations" name="69btpbnctp9fdh6cnhfk2qfs0j">&nbsp;&nbsp;&nbsp;Generational Garbage Collector - optimizes for GC by how long objects live, so long lived ones are less frequently considered.</a>
+</h3>
+<h3 class="topic">
+<a name="0ssdj5041ijjuj4dorqaukdnjm">&nbsp;&nbsp;&nbsp;&nbsp;Gen 0</a>
+</h3>
+<h3 class="topic">
+<a name="15t7luv59rtd4amhrvargefbil">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; for small newly allocated objects (like a nursery). e.g., temp variables that don't survive beyond this generation</a>
+</h3>
+<h3 class="topic">
+<a name="1vt4v6jfeov7mbj2rtl9fd05ff">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;most frequently collected</a>
+</h3>
+<h3 class="topic">
+<a name="0m96jve4u4fv38cp3of46qcfjk">&nbsp;&nbsp;&nbsp;&nbsp;Gen 1</a>
+</h3>
+<h3 class="topic">
+<a name="3fp2gs2g29e6a0uespgn6rkh2q">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for intermediate lifespan objects between Gen 0 and 2</a>
+</h3>
+<h3 class="topic">
+<a name="4bqb86obascelds2v33n8v86h1">&nbsp;&nbsp;&nbsp;&nbsp;Gen 2</a>
+</h3>
+<h3 class="topic">
+<a name="7dkup6fhok3t7k6cmiou9ue31d">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;newly allocated large objects immediately assigned here instead of Gen 0</a>
+</h3>
+<h3 class="topic">
+<a name="3ee7q55njm4uh20emiqvf2hgin">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for longer living allocations promoted from other Gens or static/global objects</a>
+</h3>
+<h3 class="topic">
+<a name="0s6d9a36mulqhmtpg8tqus01da">&nbsp;&nbsp;&nbsp;&nbsp;After GC, objects that survived GC are promoted to next Gen</a>
+</h3>
+<h3 class="topic">
+<a name="6clma8j1tjc60rprmnjmkh97vk">&nbsp;&nbsp;&nbsp;&nbsp;A higher Gen collection includes all lower Gens.</a>
+</h3>
+<h3 class="topic">
+<a href="https://devblogs.microsoft.com/dotnet/provisional-mode/" name="7b6gk01njpaud20s1ac69tu7ef">&nbsp;&nbsp;&nbsp;&nbsp;Provisional Mode</a>
+</h3>
+<h3 class="topic">
+<a name="16622bgio2kru5nonchd3q239o">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Allows GC to switch Gen during collection.</a>
+</h3>
+<h3 class="topic">
+<a name="27n2qfuo2rtiotkdm381i8fk3h">&nbsp;&nbsp;&nbsp;&nbsp;You can call GC.Collect() manually and pass in the Generation to collect.
+Doing a lower gen collection (0, 1) doesn't guarantee a particular object is collected as it may have been promoted to a higher generation.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals#compare-workstation-and-server-garbage-collection" name="5stph7jetq0tlef7q8moedencc">&nbsp;&nbsp;&nbsp;There are 2 GC modes : Workstation and Server GC, which determines which thread(s) are used for GC.</a>
+</h3>
+<h3 class="topic">
+<a name="7t26roteu5kk2rlg4efeueckg1">&nbsp;&nbsp;&nbsp;&nbsp;Background GC</a>
+</h3>
+<h3 class="topic">
+<a name="3s8vn30cbmm7g449n8ep4f6u11">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Enabled by default but can be turned off</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals#background-workstation-garbage-collection" name="74qbn99oci2ge8rsj9ifvrgefm">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Background Workstation GC</a>
+</h3>
+<h3 class="topic">
+<a name="40qremuccf7j7n8go9k6alp2h0">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Checks if Foreground GC is happening when Background GC is in progress, and suspends itself if so. i.e., it permits Foreground GC to run or interrupt Background GC and resumes when Foreground GC is done.</a>
+</h3>
+<h3 class="topic">
+<a name="4r7i5slk0aflfq5i3i833bdds8">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Applies to Gen 2 objects only</a>
+</h3>
+<h3 class="topic">
+<a name="2kggj4gspi1eik842t4t4pa4g1">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Workstation GC uses 1 dedicated thread for Background GC.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals#background-server-garbage-collection" name="4mttqo2bsfnf6n49psj0jmcvdm">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Background Server GC</a>
+</h3>
+<h3 class="topic">
+<a name="0ca673slu22libs5hriv8kaetb">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Uses multiple dedicated threads, usually one per logical CPU, with each CPU core typically having its own managed heap.</a>
+</h3>
+<h3 class="topic">
+<a name="19vpa9s1qpbuarin48p0qg12hd">&nbsp;&nbsp;&nbsp;&nbsp;Foreground GC</a>
+</h3>
+<h3 class="topic">
+<a name="1suja8fh6qjdgi1uvmmsjla2ip">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Gen 0 &amp; 1 objects</a>
+</h3>
+<h3 class="topic">
+<a name="5rlvf489d4gr3gkj8j16cl9027">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Suspends all managed threads, including Background GC threads when it runs. Native threads are not suspended.</a>
+</h3>
+<h3 class="topic">
+<a name="7b43dsg6okdl8d5p25fv464fgr">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Workstation GC uses the thread that triggered GC.</a>
+</h3>
+<h3 class="topic">
+<a name="5po8u59qa7ku1i49r9j5sngf9o">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Keeps the same priority so GC must compete with other managed threads for execution time.</a>
+</h3>
+<h3 class="topic">
+<a name="5fdt1tkh1ul74b72rl6njpr1mj">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Server GC uses multiple dedicated threads, usually one per logical CPU, with each CPU core typically having its own managed heap.</a>
+</h3>
+<h3 class="topic">
+<a name="3k08il73q92odmi9uf266s7beo">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;with higher thread priority</a>
+</h3>
+<h3 class="topic">
+<a name="4voo5fqhtnv3vn339os1c3om2q">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;All heaps GC'ed at the same time.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/fundamentals#manipulate-unmanaged-resources" name="7k6d07ruqb0amuv9t47p3k5pt5">&nbsp;&nbsp;Resources such as native file handles, network sockets, UI handles, etc are not tracked by the GC.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.finalize?view=netframework-4.8#how-finalization-works" name="5qcuc1hspgja8iv9rp3fdt3eaj">&nbsp;&nbsp;&nbsp;The CLR allows objects that are about to be collected to perform some limited actions in a Finalizer method just before they are collected, so they can release unmanaged resources. Only objects that override the Finalize method are considered finalizable.</a>
+</h3>
+<h3 class="topic">
+<a name="6lr7bfj1tiv3bceh47lks933cs">&nbsp;&nbsp;&nbsp;&nbsp;If managed objects reference unmanaged objects by using their native file handles, you have to explicitly free the unmanaged objects, because the garbage collector only tracks memory on the managed heap.</a>
+</h3>
+<h3 class="topic">
+<a name="3u7qaiek9389or079ecffnkl2c">&nbsp;&nbsp;&nbsp;&nbsp;Users of the managed object might not have disposed of the native resources used by the object. To perform the cleanup, you can make the managed object finalizable by adding a Finalizer method for the GC for call. This Finalizer method consists of cleanup actions that are executed AFTER the object is GC'ed, but see below for issues with finalizers.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/classes-and-structs/destructors" name="20its02f5vrpp923dkff7355vm">&nbsp;&nbsp;&nbsp;&nbsp;Different languages that run on the CLR may implement Finalizers slightly differently.
+In C#, they are called destructors. However, they do not behave exactly like C++ destructors because they are not called deterministically as described above.</a>
+</h3>
+<h3 class="topic">
+<a name="5a3l6rtebsqrqsjo8a306t90q7">&nbsp;&nbsp;&nbsp;Finalizers are not called deterministically - or even at all!</a>
+</h3>
+<h3 class="topic">
+<a name="6rrcg1ir304bq345u77teru19n">&nbsp;&nbsp;&nbsp;&nbsp;When a finalizable object is discovered to be dead, its finalizer is put in a queue (Finalizer-Reachable Queue) so that its cleanup actions can be executed, but the object itself is promoted to the next generation. Therefore, you have to wait until the next garbage collection that occurs on that generation (which is not necessarily the next garbage collection) to determine whether the object has been reclaimed.</a>
+</h3>
+<h3 class="topic">
+<a name="5mnn7nh7qps4sgfim50rshbgob">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The finalizer methods in the queue are executed at a later time, possibly on a different thread, not immediately during or after the object is GC'ed.</a>
+</h3>
+<h3 class="topic">
+<a name="6u0ftqbrt1tsfh15vf66n4ghsj">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The thread on which finalizing is done is not specified, nor is the order in which objects are finalized.
+i.e., the calling of object finalizers is not deterministic</a>
+</h3>
+<h3 class="topic">
+<a href="https://vkontech.com/the-dispose-pattern-step-by-step/" name="2mrt695fdpr73bop3lnt01sg5v">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Since the Finalizer method is put on a queue, this means Finalizable objects tend to live (hold on to memory) longer than non-finalizable objects, even though they have been GC'ed. Only after the finalizer is called, is the object and its memory truly released.</a>
+</h3>
+<h3 class="topic">
+<a name="2cp68s79bneedfu0pvn00t36n8">&nbsp;&nbsp;&nbsp;&nbsp;Finalizers are NOT GUARANTEED TO BE CALLED!
+The Finalize method might not run to completion or might not run at all under the following exceptional circumstances:</a>
+</h3>
+<h3 class="topic">
+<a name="3634onaq14qcinpr7arrmek180">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;If another finalizer blocks indefinitely (goes into an infinite loop, tries to obtain a lock it can never obtain, and so on). Because the runtime tries to run finalizers to completion, other finalizers might not be called if a finalizer blocks indefinitely.</a>
+</h3>
+<h3 class="topic">
+<a name="7enq2h6nu6k5lj7v83t6vv01uc">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;If the process terminates without giving the runtime a chance to clean up. In this case, the runtime's first notification of process termination is a DLL_PROCESS_DETACH notification.</a>
+</h3>
+<h3 class="topic">
+<a name="79q97tochc4hhl1e2kpl44q5r7">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The runtime continues to finalize objects during shutdown only while the number of finalizable objects continues to decrease.</a>
+</h3>
+<h3 class="topic">
+<a name="77omigqdtj3nqm9rpip94921gh">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;If Finalize or an override of Finalize throws an exception, and the runtime is not hosted by an application that overrides the default policy, the runtime terminates the process and no active try/finally blocks or finalizers are executed. This behavior ensures process integrity if the finalizer cannot free or destroy resources.</a>
+</h3>
+<h3 class="topic">
+<a href="https://github.com/dotnet/runtime/issues/9328" name="4kegi2ce4bpj9a1as5rmrl2cf5">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;When a .NET Core (2.0 and later) program ends/shuts down, Finalizers are NOT CALLED authomatically. This only happens for .NET Framework programs.</a>
+</h3>
+<h3 class="topic">
+<a href="https://github.com/dotnet/runtime/issues/16028" name="5l1n9d398r0m3ugqtd4evldm6d">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Subtopic 1</a>
+</h3>
+<h3 class="topic">
+<a name="6u6p11hfrld7rde3a025a6r5cp">&nbsp;Usage</a>
+</h3>
+<h3 class="topic">
+<a name="5ebqc1fblv6r57sqdhgdke86k4">&nbsp;&nbsp;Managing References</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/unmanaged" name="0fs7uvjdbl8799tg09rvtam6qn">&nbsp;&nbsp;&nbsp;For unmanaged resources (e.g., file handles, sockets), the managed object that uses them must release them.</a>
+</h3>
+<h3 class="topic">
+<a name="0ci8ditom0r5de4lo89jubv1te">&nbsp;&nbsp;&nbsp;Avoid strong reference cycles</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/api/system.weakreference?view=netframework-4.8" name="4sp9ivpns9nsk1h0u1i3uab0s2">&nbsp;&nbsp;&nbsp;&nbsp;Use WeakReference for when children need to reference parents or siblings, or other conventions such as using strong references only when ownership is implied.</a>
+</h3>
+<h3 class="topic">
+<a name="24rune5vng1s5119acnldbsifn">&nbsp;&nbsp;&nbsp;&nbsp;Watch out for unexpected cycles - e.g., a parent object that contains an array, that in turn contains objects that hold strong references to that parent object.</a>
+</h3>
+<h3 class="topic">
+<a name="3tg4b4luvuu5v1gpvmjcqgo17j">&nbsp;&nbsp;&nbsp;Use existing handle mechanisms to manage resource lifetimes more explicitly</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.gchandle?view=netframework-4.8" name="5eoc1ks6a3k5ubo2l4j4dnpu3o">&nbsp;&nbsp;&nbsp;&nbsp;GCHandle</a>
+</h3>
+<h3 class="topic">
+<a name="5l6pprb0a2g5ga6a1j69grkq2g">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Pinning</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.safehandle?view=netframework-4.8" name="3caat23c08u248ubltioc3m6q6">&nbsp;&nbsp;&nbsp;&nbsp;Use SafeHandle, which implements a finalizer that calls Dispose</a>
+</h3>
+<h3 class="topic">
+<a href="https://github.com/Microsoft/RoslynClrHeapAllocationAnalyzer" name="37akrl3qvbjgo0osa0j80ssrse">&nbsp;&nbsp;&nbsp;Use tools like CLRHeapAllocationAnalyzer to detect when objects are allocated/box, etc.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/unmanaged" name="5q1vn213bbj9iooreosmu6lva6">&nbsp;&nbsp;Cleaning Up - in order of preference</a>
+</h3>
+<h3 class="topic">
+<a name="6h6u1iv25fi7dhc21fgc16n8r2">&nbsp;&nbsp;&nbsp;Find somewhere to "close", release references and handles, unsubscribe to events after you know it will no longer be used. (e.g., onWindowClose)</a>
+</h3>
+<h3 class="topic">
+<a name="1cm4r2ig916gs5asgabd7qlf6e">&nbsp;&nbsp;&nbsp;Set references to null manually if the reference doesn't naturally go out of scope when you want the resource it references to be released.</a>
+</h3>
+<h3 class="topic">
+<a name="59bh8dtna36ieebmceqp1883lo">&nbsp;&nbsp;&nbsp;Explicitly call Dispose for Objects that implement IDisposable</a>
+</h3>
+<h3 class="topic">
+<a name="350v7haios2lb5qs06ue0jumrp">&nbsp;&nbsp;&nbsp;Override void Dispose(bool disposing) if deriving from an IDisposable base type and you have references you need to clear or resources to release.</a>
+</h3>
+<h3 class="topic">
+<a name="65qamfmbt9r5ms213f6mkaubql">&nbsp;&nbsp;&nbsp;Override Finalizer/destructor to call Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="59d2j7uof10gbd46e4ot2b7q09">&nbsp;&nbsp;&nbsp;&nbsp;But due to the non-deterministic nature and complexity of Finalizers, this should be treated as a last resort or backup method that is not 100% reliable.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/classes-and-structs/destructors#remarks" name="6mkoocroea6c2pu2gul5ob8etf">&nbsp;&nbsp;&nbsp;&nbsp;Implementing finalizers</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.finalize?view=netframework-4.8" name="7hieni1edt2eim0oq6t7v3ul03">&nbsp;&nbsp;Cleaning up Objects</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.finalize?view=netframework-4.8" name="065b8405018gn9lth5vr6v0abt">&nbsp;&nbsp;&nbsp;You should override Finalize for a class that holds unmanaged resources, such as file handles or database connections and other native resources that must be released when the managed object that uses them is discarded during garbage collection. You shouldn't implement a Finalize method for objects that only holds managed objects because the garbage collector releases managed resources automatically through their references.</a>
+</h3>
+<h3 class="topic">
+<a name="79dvq5ueotrc4tqurtf4ccg8pj">&nbsp;&nbsp;&nbsp;&nbsp;Do not dispose of managed objects in your class' Finalizer method, because those managed objects might already have been finalized. Finalizers should only deal with unmanaged resources.</a>
+</h3>
+<h3 class="topic">
+<a name="71atk1avspfl4djujgnooivpi8">&nbsp;&nbsp;&nbsp;&nbsp;you should override the Finalize method for reference types only. The common language runtime only finalizes reference types. It ignores finalizers on value types.</a>
+</h3>
+<h3 class="topic">
+<a name="73cdin5drps7al9ukhaj1e5aus">&nbsp;&nbsp;&nbsp;&nbsp;Every implementation of Finalize in a derived type must call its base type's implementation of Finalize. This is the only case in which application code is allowed to call Finalize. An object's Finalize method shouldn't call a method on any objects other than that of its base class. This is because the other objects being called could be collected at the same time as the calling object, such as in the case of a common language runtime shutdown.</a>
+</h3>
+<h3 class="topic">
+<a name="173ugn1grplf030rfegbiegm6c">&nbsp;&nbsp;&nbsp;</a>
+</h3>
+<h3 class="topic">
+<a name="4h6jgo0duqmtqtb43vof510eci">&nbsp;&nbsp;&nbsp;Because garbage collection is non-deterministic, you do not know precisely when the garbage collector performs finalization. To release resources immediately or deterministically, you can also choose to implement the dispose pattern and the IDisposable interface. The IDisposable.Dispose implementation can be called by consumers of your class to free unmanaged resources, and you can use the Finalize method to free unmanaged resources in the event that the Dispose method is not called.</a>
+</h3>
+<h3 class="topic">
+<a name="2q0d08nsmffg3kr710u6reosna">&nbsp;&nbsp;&nbsp;&nbsp;The preferred method of cleaning up is to use explicit Close methods or the Dispose pattern that users of the disposable objects call manually so they can be cleaned up deterministically.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.finalize?view=netframework-4.8#the-safehandle-alternative" name="46a1fta4ds3bq7jk000pro8639">&nbsp;&nbsp;&nbsp;If a SafeHandle object is available that wraps your unmanaged resource, the recommended alternative is to implement the dispose pattern with a safe handle and not override Finalize. </a>
+</h3>
+<h3 class="topic">
+<a name="4fsi10rkgqtjoe6mfv58i0ltdt">&nbsp;&nbsp;&nbsp;Reclaiming memory tends to take much longer if a finalization operation runs, because it requires at least two garbage collections, since finalizable objects are promoted to the next generation before their finalizer is called.</a>
+</h3>
+<h3 class="topic">
+<a name="6atc5foj7uflouh48c96u8kr2m">&nbsp;&nbsp;&nbsp;&nbsp;i.e., there is a runtime cost</a>
+</h3>
+<h3 class="topic">
+<a name="3ql3f6pk37b4t3aitq8j3poprc">&nbsp;&nbsp;Finding &amp; fixing leaks</a>
+</h3>
+<h3 class="topic">
+<a name="25b43htqmj8dshr87vmjm7i8h1">&nbsp;&nbsp;&nbsp;Profiling memory usage</a>
+</h3>
+<h3 class="topic">
+<a name="3mf3e9h48lhki51fn682tb7oiv">&nbsp;&nbsp;&nbsp;&nbsp;Tools</a>
+</h3>
+<h3 class="topic">
+<a href="https://michaelscodingspot.com/find-fix-and-avoid-memory-leaks-in-c-net-8-best-practices/" name="6nneh5ubvtc1d6ubnfsfja38pu">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Visual Studio Diagnostics Tool - Memory Usage profiler with snapshot comparisons</a>
+</h3>
+<h3 class="topic">
+<a name="4qpcsvcjmpa00jrjtsqdkopo62">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Visual Studio Debugger</a>
+</h3>
+<h3 class="topic">
+<a href="https://michaelscodingspot.com/find-fix-and-avoid-memory-leaks-in-c-net-8-best-practices/" name="69rl9bsjed60642o0jk1v66s6d">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Make Object ID &amp; Immediate Window</a>
+</h3>
+<h3 class="topic">
+<a name="5qt60l6eup15osuulf9kt3anka">&nbsp;&nbsp;&nbsp;&nbsp;Scripting</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.performancecounter?view=netframework-4.8" name="6jemnmt16qj3gdim002bs3pihe">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;PerformanceCounter</a>
+</h3>
+<h3 class="topic">
+<a href="https://github.com/Microsoft/clrmd" name="4r7hd3o4shs89un7et50g08dql">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Microsoft CLR Diagnostics Runtime API</a>
+</h3>
+<h3 class="topic">
+<a name="0p2vgb77phfrlem7dudsof1reh">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Enumerating FinalizerQueue</a>
+</h3>
+<h3 class="topic">
+<a name="3bkiv86tnimdlfrrla7umh1o31">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Enumerating GCHandles</a>
+</h3>
+<h3 class="topic">
+<a href="https://github.com/microsoft/dotnet-samples/tree/master/Microsoft.Diagnostics.Runtime/CLRMD" name="340e1lucpsdrvfel88060pc6ih">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Samples</a>
+</h3>
+<h3 class="topic">
+<a name="4t4hke3j5vqikf7kvo7qa9o0qr">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Walk GC Heap</a>
+</h3>
+<h3 class="topic">
+<a name="2v8kh1mgke1vu25csuuh2d8uck">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Walk GC Roots</a>
+</h3>
+<h3 class="topic">
+<a name="7kekh1e4ivlud0aadnfoh5cec1">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Enumerating CLR Memory Regions</a>
+</h3>
+<h3 class="topic">
+<a name="7uj94ic5jj93g9vd8e2902jgjh">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Create WeakReferences to wrap objects and use .IsAlive to track where/when the object GC'ed.</a>
+</h3>
+<h3 class="topic">
+<a name="3d4vq281qkvteir59qqc8rtf2m">&nbsp;Experiments</a>
+</h3>
+<h3 class="topic">
+<a name="48u9hjcjjli1ur95ng3e7lt064">&nbsp;&nbsp;Runtime Variations</a>
+</h3>
+<h3 class="topic">
+<a name="6emokp6j03u3f2o9u64uf0tbrp">&nbsp;&nbsp;&nbsp;.NET Core</a>
+</h3>
+<h3 class="topic">
+<a name="2qghe29mfuotvgc9j99cb0j238">&nbsp;&nbsp;&nbsp;.NET Framework</a>
+</h3>
+<h3 class="topic">
+<a name="452etl8fmc7blodejnep55am5h">&nbsp;&nbsp;Create new objects of class with overridden Finalize to see when it is called or not</a>
+</h3>
+<h3 class="topic">
+<a name="3itufq7tg3t33prnjvulm1uli6">&nbsp;&nbsp;Event handling Test cases</a>
+</h3>
+<h3 class="topic">
+<a name="4gitaonahgjr5q6fo41pn707qb">&nbsp;&nbsp;&nbsp;Event handlers</a>
+</h3>
+<h3 class="topic">
+<a name="6vt8tthbs4jbjkvm1emm6pqavl">&nbsp;&nbsp;&nbsp;&nbsp;anonymous methods</a>
+</h3>
+<h3 class="topic">
+<a name="3rg5ku6cpvd9s4tga6tsfipidh">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;delegates</a>
+</h3>
+<h3 class="topic">
+<a name="2ene28d9sh20mrdttbkm6494qc">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;lambda</a>
+</h3>
+<h3 class="topic">
+<a name="1hq2f0jmch3q042olod9hmh6s1">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;closure capture of free variables</a>
+</h3>
+<h3 class="topic">
+<a name="512vhc76rp8fk1ogk8kefv93to">&nbsp;&nbsp;&nbsp;&nbsp;named methods</a>
+</h3>
+<h3 class="topic">
+<a name="0c6fbih7u9kl6bjllgulbs61lo">&nbsp;&nbsp;&nbsp;subscribe, no unsubscribe</a>
+</h3>
+<h3 class="topic">
+<a name="2fsbu9ghl67h2uuev63bpq59i1">&nbsp;&nbsp;&nbsp;subscribe, unsubscribe</a>
+</h3>
+<h2 class="topic">
+<a name="30oh2thdm6ean7g9h8rodqspis">Disposable pattern</a>
+</h2>
+<h3 class="topic">
+<a name="70glfioq7n1601n2bqtc4q8hrs">&nbsp;Usage</a>
+</h3>
+<h3 class="topic">
+<a name="28es4qiq249eo7tniuapsb7ej3">&nbsp;&nbsp;For classes that
+* hold other Managed classes/resources that should be released manually by client code,  or objects that implement IDisposable
+* derive from Disposable base class</a>
+</h3>
+<h3 class="topic">
+<a href="https://vkontech.com/the-dispose-pattern-step-by-step/" name="3qomdieb48v0muj3i3h2h7ppnp">&nbsp;&nbsp;&nbsp;Implement Disposable pattern</a>
+</h3>
+<h3 class="topic">
+<a name="714pr7mc1cu4rnfbh6bgjn5qui">&nbsp;&nbsp;&nbsp;Make sure nothing bad happens if Dispose is called several times</a>
+</h3>
+<h3 class="topic">
+<a name="47qqjae6smuhbt40qrk14dqhg9">&nbsp;&nbsp;&nbsp;&nbsp;most common method is a simple bool check to skip if already disposed.</a>
+</h3>
+<h3 class="topic">
+<a name="4dlb603e0934cc6a2ag7mhr1a5">&nbsp;&nbsp;Class uses Umanaged resources</a>
+</h3>
+<h3 class="topic">
+<a name="7gdf3aqbhp2gi622m0emvg6qbh">&nbsp;&nbsp;&nbsp;Implement Disposable pattern AND Finalizer</a>
+</h3>
+<h3 class="topic">
+<a name="70d407ip1acph3nv9357hkl7d4">&nbsp;&nbsp;&nbsp;&nbsp;Remember to call GC.SupressFinalize in Dispose method to prevent Finalizer from being called if object is already manually disposed by client code that uses the object.</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose#dispose-and-disposeboolean" name="74vioo795du89ai3r0ogchp4gn">&nbsp;&nbsp;&nbsp;&nbsp;If you prefer to put your cleaning up code in one place instead of repeating it in the finalizer, put it in the virtual Dispose(bool isDiposing) method. Then call it with true from the non-virtual Dispose() method and with false from the Finalizer. Wrap the clean up code that should only be called when client code manually disposes the object with the isDisposing flag.</a>
+</h3>
+<h3 class="topic">
+<a name="2iemqecrl1ak50o1f2u2g6c2ok">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;This pattern also works better with class inheritance hierarchy. The derived class should clean up its resources first, then call the base class' Dispose(isDisposing).</a>
+</h3>
+<h3 class="topic">
+<a name="303lv415749p1vffkvktcqjg1s">&nbsp;&nbsp;Tools</a>
+</h3>
+<h3 class="topic">
+<a name="1naptmd6p8e33dme60gpfut0ba">&nbsp;&nbsp;&nbsp;FxCop Static Analysis</a>
+</h3>
+<h3 class="topic">
+<a href="https://docs.microsoft.com/en-us/visualstudio/code-quality/ca2213?view=vs-2019" name="2d7gdp0uiru1rgq3j5dtnpd0bo">&nbsp;&nbsp;&nbsp;&nbsp;Disposable Pattern Usage</a>
+</h3>
+<h3 class="topic">
+<a name="0ee11h2l12vc327i6o6f65g3m3">&nbsp;Experiments</a>
+</h3>
+<h3 class="topic">
+<a name="3q9njliam676ujkuef7erc4og8">&nbsp;&nbsp;Create new objects of class with overridden Dispose called from Finalize to see when it is called or not</a>
+</h3>
+<h2 class="topic">
+<a name="6b1hl0mkhu1508p8mbe1a7ogu8">Native UI Memory Management</a>
+</h2>
+<h3 class="topic">
+<a name="05m536gkdh61ti200li21plho5">&nbsp;macOS</a>
+</h3>
+<h3 class="topic">
+<a name="0n5sonmd7n0484ccajk07ur7fl">&nbsp;iOS</a>
+</h3>
+<h2 class="topic">
+<a name="7g1idc3f6233adl3luec6ok2d9">Xamarin.Mac/iOS</a>
+</h2>
+<h3 class="topic">
+<a name="3tmfdfvjeh0f2233kej6elc6ct">&nbsp;Experiments</a>
+</h3>
+<h3 class="topic">
+<a name="70mg1d6a743g0qe1lfii7ooi79">&nbsp;&nbsp;NSWindow</a>
+</h3>
+<h3 class="topic">
+<a name="7tl23cug86ebk6kieelp92d3bu">&nbsp;&nbsp;&nbsp;NSWindow</a>
+</h3>
+<h3 class="topic">
+<a name="1mopud9hejot5lvg6e9vtc03oc">&nbsp;&nbsp;&nbsp;&nbsp;without holding extra references</a>
+</h3>
+<h3 class="topic">
+<a name="67a2lelvi1ehct0t1abg18nvrf">&nbsp;&nbsp;&nbsp;&nbsp;hold extra reference</a>
+</h3>
+<h3 class="topic">
+<a name="60rg81paukod1rp1dno5527as8">&nbsp;&nbsp;&nbsp;NSWindow with Delegate</a>
+</h3>
+<h3 class="topic">
+<a name="1ae65b610amgrp7hs6q7hb2ohi">&nbsp;&nbsp;&nbsp;&nbsp;Delegate</a>
+</h3>
+<h3 class="topic">
+<a name="0evj1po8n7io17eh1sogqkbuee">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;without nulling</a>
+</h3>
+<h3 class="topic">
+<a name="3uh6kvi3gl9s29lek6e36nf0jt">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;with nulling</a>
+</h3>
+<h3 class="topic">
+<a name="0e51dnvel7f3ptfau04ohckevn">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;without Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="2m50vrlnr36f0igkso000e4mke">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;with Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="1u13624annv6vd06d011e1ll34">&nbsp;&nbsp;&nbsp;&nbsp;WeakDelegate</a>
+</h3>
+<h3 class="topic">
+<a name="20esuejbq5f78g694jd77hnfqg">&nbsp;&nbsp;&nbsp;User-derived NSWindow</a>
+</h3>
+<h3 class="topic">
+<a name="1ruuqrf6siueqpdm8741cnd7tg">&nbsp;&nbsp;&nbsp;&nbsp;without nulling</a>
+</h3>
+<h3 class="topic">
+<a name="19q4d42184lab3l28juvm7a933">&nbsp;&nbsp;&nbsp;&nbsp;with nulling</a>
+</h3>
+<h3 class="topic">
+<a name="142k9hojejvsiljch09utj1f2h">&nbsp;&nbsp;&nbsp;&nbsp;without Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="4vinqdrqtbm8b4g2vpn7vhrqjp">&nbsp;&nbsp;&nbsp;&nbsp;with Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="4ri3ec3re5r7lupo2j81f3kkqh">&nbsp;&nbsp;&nbsp;NSWindow with NSWindowController</a>
+</h3>
+<h3 class="topic">
+<a name="2mc0ud9iv2qeu0693vd576k599">&nbsp;&nbsp;&nbsp;&nbsp;without nulling</a>
+</h3>
+<h3 class="topic">
+<a name="0r5invjbs3fhbu7ls1li5o63sh">&nbsp;&nbsp;&nbsp;&nbsp;with nulling</a>
+</h3>
+<h3 class="topic">
+<a name="23gaf2bjrlqf17q4f8hkrlqth2">&nbsp;&nbsp;&nbsp;&nbsp;without Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="3jr45sgcv1huc01rkugv7gulmi">&nbsp;&nbsp;&nbsp;&nbsp;with Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="0550looncagkejteb9dmm3pun5">&nbsp;&nbsp;&nbsp;NSWindow with User-derived NSWindowController</a>
+</h3>
+<h3 class="topic">
+<a name="1na0p33ef9pu12000en76jid3c">&nbsp;&nbsp;&nbsp;&nbsp;without nulling</a>
+</h3>
+<h3 class="topic">
+<a name="38l1o05mvfatrbjl5d20diu06o">&nbsp;&nbsp;&nbsp;&nbsp;with nulling</a>
+</h3>
+<h3 class="topic">
+<a name="5hb10ilgfvll1u8dic5454rhp2">&nbsp;&nbsp;&nbsp;&nbsp;without Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="11i9820hgt52a33e9n9er4cqou">&nbsp;&nbsp;&nbsp;&nbsp;with Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="389r8mfltkoolfggk8237liuth">&nbsp;&nbsp;&nbsp;User-derived NSWindow and NSWindowController</a>
+</h3>
+<h3 class="topic">
+<a name="42atg6jsf1l49va2fuq2l6ljvr">&nbsp;&nbsp;&nbsp;&nbsp;without nulling</a>
+</h3>
+<h3 class="topic">
+<a name="5vjs4c7q3u31l58cvebf0mci2p">&nbsp;&nbsp;&nbsp;&nbsp;with nulling</a>
+</h3>
+<h3 class="topic">
+<a name="7fr7jj63hrtling2h3m9l19qg4">&nbsp;&nbsp;&nbsp;&nbsp;without Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="1ov3mn9otrc1554igj5sscbc9s">&nbsp;&nbsp;&nbsp;&nbsp;with Dispose</a>
+</h3>
+<h3 class="topic">
+<a name="7p80sve9ua5sv1iq4iatg4e02d">&nbsp;&nbsp;NSView</a>
+</h3>
+<h2 class="topic">
+<a name="79t2a3sfgcuo5l0hpl3bddpomv">Rx.NET</a>
+</h2>
+<h3 class="topic">
+<a href="http://introtorx.com/Content/v1.0.10621.0/03_LifetimeManagement.html#LifetimeManagement" name="2lc6mq9k2u21o27msdoofik97a">&nbsp;Lifetime Management</a>
+</h3>
+<h3 class="topic">
+<a name="2c4t3p1gl1dfbmktmaghe63sdj">&nbsp;&nbsp;subscriptions will not be automatically disposed of. You can safely assume that the instance of IDisposable that is returned to you does not have a finalizer and will not be collected when it goes out of scope. If you call a Subscribe method and ignore the return value, you have lost your only handle to unsubscribe. The subscription will still exist, and you have effectively lost access to this resource, which could result in leaking memory and running unwanted processes.</a>
+</h3>
+<h3 class="topic">
+<a name="184i34cqunjv1aci3pkr9930i2">&nbsp;&nbsp;The exception to this cautionary note is when using the Subscribe extension methods. These methods will internally construct behavior that will automatically detach subscriptions when the sequence completes or errors. Even with the automatic detach behavior; you still need to consider sequences that never terminate (by OnCompleted or OnError). You will need the instance of IDisposable to terminate the subscription to these infinite sequences explicitly.</a>
+</h3>
+<h3 class="topic">
+<a name="6i75avlm6j40kcoqedfgj92r44">&nbsp;&nbsp;You will find many of the examples in this book will not allocate the IDisposable return value. This is only for brevity and clarity of the sample.</a>
+</h3>
+<h3 class="topic">
+<a name="5hb6c7kuv8g95p2ldimim1eic3">&nbsp;Questions</a>
+</h3>
+<h3 class="topic">
+<a name="1fkp3oqi4f8e07i7hvkvkh3s2m">&nbsp;&nbsp;Do I need to dispose of Observables (e.g., Subject - built-in or custom) or just subscriptions (Observers)?</a>
+</h3>
+<h3 class="topic">
+<a name="3pe9qjp24jqr56vfvr2qmprghi">&nbsp;Usage</a>
+</h3>
+<h3 class="topic">
+<a href="http://introtorx.com/Content/v1.0.10621.0/03_LifetimeManagement.html#OnErrorAndOnCompleted" name="187j79ro8pv74momtlfoo3r3mo">&nbsp;&nbsp;Always dispose of Observer subscriptions, even when the Observable they are subscribed to ends (completes or errors).</a>
+</h3>
+<h3 class="topic">
+<a name="0hn9itejs64t99gsa4innnrttb">&nbsp;&nbsp;&nbsp;The recommendation doesn't come with additional details explaining why.
+Some Observables do call dispose on their subscribers when they complete or error.</a>
+</h3>
+<h3 class="topic">
+<a name="3bikgpno3l3nedp9noslamlrj4">&nbsp;Experiments</a>
+</h3>
+<h3 class="topic">
+<a name="6hb0vo488f9addl2uamruhkb8t">&nbsp;&nbsp;Use SafeHandle to wrap Disposables?</a>
+</h3>
+</body>
+</html>
